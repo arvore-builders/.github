@@ -2,6 +2,8 @@ name: Claude Security Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -12,3 +14,4 @@ jobs:
     uses: arvore-builders/.github/.github/workflows/claude-security.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}

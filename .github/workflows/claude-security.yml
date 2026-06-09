@@ -2,21 +2,41 @@ name: claude-security
 
 on:
   workflow_call:
+    inputs:
+      claude-model:
+        required: false
+        type: string
+        default: ""
+      exclude-directories:
+        required: false
+        type: string
+        default: "node_modules,dist,build,.next,coverage,vendor"
     secrets:
       ANTHROPIC_API_KEY:
         required: true
+      SLACK_SECURITY_WEBHOOK:
+        required: false
 
 jobs:
-  review:
+  pr-review:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout
+      - name: Checkout target repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Checkout security scripts
+        uses: actions/checkout@v4
+        with:
+          repository: arvore-builders/.github
+          ref: main
+          path: .security-pipeline
+          token: ${{ github.token }}
 
       - name: Claude security review
         id: scan
@@ -25,29 +45,66 @@ jobs:
           claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           comment-pr: "true"
           upload-results: "true"
-          exclude-directories: "node_modules,dist,build,.next,coverage,vendor"
+          exclude-directories: ${{ inputs.exclude-directories }}
+          claude-model: ${{ inputs.claude-model }}
 
-      - name: Gate on HIGH/CRITICAL findings
+      - name: Evaluate findings and notify
         if: always()
+        env:
+          SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+          CONTEXT_KIND: "pull_request"
+          CONTEXT_REF: ${{ github.event.pull_request.html_url }}
+          CONTEXT_TITLE: ${{ github.event.pull_request.title }}
+          CONTEXT_REPO: ${{ github.repository }}
+          CONTEXT_ACTOR: ${{ github.actor }}
+        run: bash .security-pipeline/.github/security-scripts/evaluate-and-notify.sh claudecode-results.json
+
+  push-review:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout security scripts
+        uses: actions/checkout@v4
+        with:
+          repository: arvore-builders/.github
+          ref: main
+          path: .security-pipeline
+          token: ${{ github.token }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude CLI and jq
         run: |
-          RESULTS="claudecode-results.json"
-          if [ ! -f "$RESULTS" ]; then
-            echo "No results file found; nothing to gate on."
-            exit 0
-          fi
+          npm install -g @anthropic-ai/claude-code
+          sudo apt-get update && sudo apt-get install -y jq
 
-          if jq -e '.error' "$RESULTS" >/dev/null 2>&1; then
-            echo "::warning::Scan reported an error; not blocking merge on scan failure."
-            exit 0
-          fi
+      - name: Run push security scan
+        id: scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ inputs.claude-model }}
+          EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: bash .security-pipeline/.github/security-scripts/push-scan.sh
 
-          BLOCKING=$(jq '[.findings[]? | select((.severity | ascii_upcase) == "HIGH" or (.severity | ascii_upcase) == "CRITICAL")] | length' "$RESULTS")
-          echo "HIGH/CRITICAL findings: $BLOCKING"
-
-          if [ "$BLOCKING" -gt 0 ]; then
-            echo "::error::$BLOCKING HIGH/CRITICAL security finding(s) detected. Resolve them before merging."
-            jq -r '.findings[]? | select((.severity | ascii_upcase) == "HIGH" or (.severity | ascii_upcase) == "CRITICAL") | "- [\(.severity)] \(.file):\(.line) — \(.description)"' "$RESULTS"
-            exit 1
-          fi
-
-          echo "No HIGH/CRITICAL findings. Gate passed."
+      - name: Evaluate findings and notify
+        if: always()
+        env:
+          SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+          CONTEXT_KIND: "push"
+          CONTEXT_REF: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          CONTEXT_TITLE: ${{ github.event.head_commit.message }}
+          CONTEXT_REPO: ${{ github.repository }}
+          CONTEXT_ACTOR: ${{ github.actor }}
+        run: bash .security-pipeline/.github/security-scripts/evaluate-and-notify.sh claudecode-results.json
