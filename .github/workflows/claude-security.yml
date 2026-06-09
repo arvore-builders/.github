@@ -76,15 +76,8 @@ jobs:
           ref: main
           path: .security-pipeline
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Claude CLI and jq
-        run: |
-          npm install -g @anthropic-ai/claude-code
-          sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Run push security scan
         env:

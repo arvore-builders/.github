@@ -54,57 +54,41 @@ fi
 
 MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
 
-PROMPT_FILE="$(mktemp)"
-cat > "$PROMPT_FILE" <<'PROMPT'
-You are a senior security engineer reviewing code pushed directly to a default branch (no pull request).
+SYSTEM_PROMPT='You are a senior security engineer reviewing code pushed directly to a default branch (no pull request). Identify HIGH-CONFIDENCE security vulnerabilities newly introduced by the diff. Focus ONLY on real, exploitable issues: injection (SQL/command/XSS), authentication/authorization bypass, hardcoded secrets or credentials, insecure deserialization, SSRF, path traversal, unsafe cryptography, and exposure of sensitive data. Ignore style, performance, and pre-existing concerns. Output ONLY a single JSON object with this schema: {"findings":[{"file":"path","line":0,"severity":"HIGH","category":"x","description":"y","recommendation":"z","confidence":0.9}]}. Severity must be HIGH, MEDIUM, or LOW. If there are no findings, output {"findings": []}. Do not wrap the JSON in markdown fences.'
 
-OBJECTIVE:
-Identify HIGH-CONFIDENCE security vulnerabilities newly introduced by the diff below. Focus ONLY on real, exploitable security issues introduced by these changes. Ignore style, performance, and pre-existing concerns.
+USER_CONTENT="Review this diff for newly introduced security vulnerabilities:\n\n$(cat "$DIFF_FILE")"
 
-Look for: injection (SQL/command/XSS), authentication/authorization bypass, hardcoded secrets or credentials, insecure deserialization, SSRF, path traversal, unsafe use of cryptography, and exposure of sensitive data.
-
-OUTPUT FORMAT (MANDATORY):
-Output ONLY a single JSON object, no prose, with this exact schema:
-{
-  "findings": [
-    {
-      "file": "path/to/file",
-      "line": 0,
-      "severity": "HIGH",
-      "category": "short_category",
-      "description": "what the issue is",
-      "recommendation": "how to fix it",
-      "confidence": 0.9
-    }
-  ]
-}
-Severity must be one of HIGH, MEDIUM, LOW. If there are no findings, output {"findings": []}.
-
-DIFF TO REVIEW:
-PROMPT
-
-cat "$DIFF_FILE" >> "$PROMPT_FILE"
-
-echo "Running Claude CLI security analysis on push diff (model: $MODEL)..."
+echo "Running Anthropic API security analysis on push diff (model: $MODEL)..."
 RAW_OUTPUT="$(mktemp)"
-cat "$PROMPT_FILE" | claude -p --output-format json --model "$MODEL" --disallowed-tools 'Bash(ps:*)' > "$RAW_OUTPUT" 2>"${RAW_OUTPUT}.err" || {
-  echo "::warning::Claude CLI exited non-zero"
-  cat "${RAW_OUTPUT}.err" || true
-}
+REQ_BODY="$(mktemp)"
+jq -n \
+  --arg model "$MODEL" \
+  --arg system "$SYSTEM_PROMPT" \
+  --arg user "$USER_CONTENT" \
+  '{model: $model, max_tokens: 2048, system: $system, messages: [{role: "user", content: $user}]}' > "$REQ_BODY"
 
-echo "::group::Claude CLI raw output (first 2000 chars)"
+HTTP=$(curl -s -o "$RAW_OUTPUT" -w "%{http_code}" https://api.anthropic.com/v1/messages \
+  -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  --data @"$REQ_BODY" || echo "000")
+echo "Anthropic API HTTP status: $HTTP"
+
+echo "::group::Anthropic API raw output (first 2000 chars)"
 head -c 2000 "$RAW_OUTPUT" || true
 echo
 echo "::endgroup::"
 
-RESULT_TEXT=$(jq -r '.result // empty' "$RAW_OUTPUT" 2>/dev/null)
-if [ -z "$RESULT_TEXT" ]; then
-  RESULT_TEXT=$(cat "$RAW_OUTPUT")
+if [ "$HTTP" != "200" ]; then
+  echo "::warning::Anthropic API returned $HTTP; treating as no findings."
+  echo '{"findings":[]}' > "$RESULTS_FILE"
+  echo "Push scan parsed 0 finding(s)."
+  exit 0
 fi
 
-FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | sed -n 's/^```json//; s/^```//; p' | grep -o '{.*}' | tail -1)
-if [ -z "$FINDINGS_JSON" ]; then
-  FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | python3 -c 'import sys,re,json
+RESULT_TEXT=$(jq -r '.content[]? | select(.type=="text") | .text' "$RAW_OUTPUT" 2>/dev/null)
+
+FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | python3 -c 'import sys,re,json
 s=sys.stdin.read()
 m=re.findall(r"\{(?:[^{}]|\{[^{}]*\})*\}", s, re.DOTALL)
 for cand in reversed(m):
@@ -114,12 +98,11 @@ for cand in reversed(m):
             print(json.dumps(o)); break
     except Exception:
         pass' 2>/dev/null)
-fi
 
 if printf '%s' "$FINDINGS_JSON" | jq -e '.findings' >/dev/null 2>&1; then
   printf '%s' "$FINDINGS_JSON" | jq '{findings: (.findings // [])}' > "$RESULTS_FILE"
 else
-  echo "::warning::Could not parse Claude output as JSON; treating as no findings."
+  echo "::warning::Could not parse model output as JSON; treating as no findings."
   echo '{"findings":[]}' > "$RESULTS_FILE"
 fi
 
