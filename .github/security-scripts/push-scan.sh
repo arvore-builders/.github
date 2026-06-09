@@ -4,7 +4,6 @@ set -uo pipefail
 RESULTS_FILE="claudecode-results.json"
 echo '{"findings":[]}' > "$RESULTS_FILE"
 
-echo "DEBUG: ANTHROPIC_API_KEY length=${#ANTHROPIC_API_KEY:-0}"
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "::error::ANTHROPIC_API_KEY is not set"
   exit 1
