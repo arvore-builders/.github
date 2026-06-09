@@ -87,22 +87,40 @@ cat "$DIFF_FILE" >> "$PROMPT_FILE"
 
 echo "Running Claude CLI security analysis on push diff (model: $MODEL)..."
 RAW_OUTPUT="$(mktemp)"
-claude --model "$MODEL" --print < "$PROMPT_FILE" > "$RAW_OUTPUT" 2>"${RAW_OUTPUT}.err" || {
+claude --output-format json --model "$MODEL" --disallowed-tools 'Bash(ps:*)' < "$PROMPT_FILE" > "$RAW_OUTPUT" 2>"${RAW_OUTPUT}.err" || {
   echo "::warning::Claude CLI exited non-zero"
   cat "${RAW_OUTPUT}.err" || true
 }
 
-PARSED=$(sed -n '/{/,/}/p' "$RAW_OUTPUT" | tr -d '\000')
-if echo "$PARSED" | jq -e '.findings' >/dev/null 2>&1; then
-  echo "$PARSED" | jq '{findings: (.findings // [])}' > "$RESULTS_FILE"
+echo "::group::Claude CLI raw output (first 2000 chars)"
+head -c 2000 "$RAW_OUTPUT" || true
+echo
+echo "::endgroup::"
+
+RESULT_TEXT=$(jq -r '.result // empty' "$RAW_OUTPUT" 2>/dev/null)
+if [ -z "$RESULT_TEXT" ]; then
+  RESULT_TEXT=$(cat "$RAW_OUTPUT")
+fi
+
+FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | sed -n 's/^```json//; s/^```//; p' | grep -o '{.*}' | tail -1)
+if [ -z "$FINDINGS_JSON" ]; then
+  FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | python3 -c 'import sys,re,json
+s=sys.stdin.read()
+m=re.findall(r"\{(?:[^{}]|\{[^{}]*\})*\}", s, re.DOTALL)
+for cand in reversed(m):
+    try:
+        o=json.loads(cand)
+        if isinstance(o,dict) and "findings" in o:
+            print(json.dumps(o)); break
+    except Exception:
+        pass' 2>/dev/null)
+fi
+
+if printf '%s' "$FINDINGS_JSON" | jq -e '.findings' >/dev/null 2>&1; then
+  printf '%s' "$FINDINGS_JSON" | jq '{findings: (.findings // [])}' > "$RESULTS_FILE"
 else
-  CLEANED=$(grep -o '{.*}' "$RAW_OUTPUT" | tail -1)
-  if echo "$CLEANED" | jq -e '.findings' >/dev/null 2>&1; then
-    echo "$CLEANED" | jq '{findings: (.findings // [])}' > "$RESULTS_FILE"
-  else
-    echo "::warning::Could not parse Claude output as JSON; treating as no findings."
-    echo '{"findings":[]}' > "$RESULTS_FILE"
-  fi
+  echo "::warning::Could not parse Claude output as JSON; treating as no findings."
+  echo '{"findings":[]}' > "$RESULTS_FILE"
 fi
 
 COUNT=$(jq '.findings | length' "$RESULTS_FILE")
