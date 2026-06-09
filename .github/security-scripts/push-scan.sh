@@ -88,16 +88,35 @@ fi
 
 RESULT_TEXT=$(jq -r '.content[]? | select(.type=="text") | .text' "$RAW_OUTPUT" 2>/dev/null)
 
-FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | python3 -c 'import sys,re,json
-s=sys.stdin.read()
-m=re.findall(r"\{(?:[^{}]|\{[^{}]*\})*\}", s, re.DOTALL)
-for cand in reversed(m):
+FINDINGS_JSON=$(printf '%s' "$RESULT_TEXT" | python3 -c '
+import sys, json, re
+s = sys.stdin.read().strip()
+s = re.sub(r"^```(?:json)?", "", s).strip()
+s = re.sub(r"```$", "", s).strip()
+
+def try_load(t):
     try:
-        o=json.loads(cand)
-        if isinstance(o,dict) and "findings" in o:
-            print(json.dumps(o)); break
+        o = json.loads(t)
+        return o if isinstance(o, dict) and "findings" in o else None
     except Exception:
-        pass' 2>/dev/null)
+        return None
+
+res = try_load(s)
+if res is None:
+    start = s.find("{")
+    while start != -1 and res is None:
+        depth = 0
+        for i in range(start, len(s)):
+            if s[i] == "{": depth += 1
+            elif s[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    res = try_load(s[start:i+1])
+                    break
+        start = s.find("{", start + 1)
+
+print(json.dumps(res) if res is not None else "")
+' 2>/dev/null)
 
 if printf '%s' "$FINDINGS_JSON" | jq -e '.findings' >/dev/null 2>&1; then
   printf '%s' "$FINDINGS_JSON" | jq '{findings: (.findings // [])}' > "$RESULTS_FILE"
