@@ -3,6 +3,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   claude-security:
     uses: arvore-builders/.github/.github/workflows/claude-security.yml@main
