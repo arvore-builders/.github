@@ -2,19 +2,6 @@ name: claude-security
 
 on:
   workflow_call:
-    inputs:
-      exclude-directories:
-        required: false
-        type: string
-        default: "node_modules,dist,build,.next,coverage,vendor"
-      claude-model:
-        required: false
-        type: string
-        default: ""
-      block-on-high:
-        required: false
-        type: boolean
-        default: true
 
 jobs:
   review:
@@ -33,13 +20,12 @@ jobs:
         uses: anthropics/claude-code-security-review@main
         with:
           claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          comment-pr: true
-          upload-results: true
-          exclude-directories: ${{ inputs.exclude-directories }}
-          claude-model: ${{ inputs.claude-model }}
+          comment-pr: "true"
+          upload-results: "true"
+          exclude-directories: "node_modules,dist,build,.next,coverage,vendor"
 
       - name: Gate on HIGH/CRITICAL findings
-        if: always() && inputs.block-on-high
+        if: always()
         run: |
           RESULTS="claudecode-results.json"
           if [ ! -f "$RESULTS" ]; then
@@ -56,7 +42,7 @@ jobs:
           echo "HIGH/CRITICAL findings: $BLOCKING"
 
           if [ "$BLOCKING" -gt 0 ]; then
-            echo "::error::$BLOCKING HIGH/CRITICAL security finding(s) detected. Resolve them or override via repo admin before merging."
+            echo "::error::$BLOCKING HIGH/CRITICAL security finding(s) detected. Resolve them before merging."
             jq -r '.findings[]? | select((.severity | ascii_upcase) == "HIGH" or (.severity | ascii_upcase) == "CRITICAL") | "- [\(.severity)] \(.file):\(.line) — \(.description)"' "$RESULTS"
             exit 1
           fi
