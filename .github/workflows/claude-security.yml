@@ -36,7 +36,6 @@ jobs:
           repository: arvore-builders/.github
           ref: main
           path: .security-pipeline
-          token: ${{ github.token }}
 
       - name: Claude security review
         id: scan
@@ -76,7 +75,6 @@ jobs:
           repository: arvore-builders/.github
           ref: main
           path: .security-pipeline
-          token: ${{ github.token }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -89,7 +87,6 @@ jobs:
           sudo apt-get update && sudo apt-get install -y jq
 
       - name: Run push security scan
-        id: scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.claude-model }}
