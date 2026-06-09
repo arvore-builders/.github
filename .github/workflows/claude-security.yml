@@ -2,6 +2,9 @@ name: claude-security
 
 on:
   workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
 
 jobs:
   review:

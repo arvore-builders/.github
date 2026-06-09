@@ -10,4 +10,5 @@ permissions:
 jobs:
   claude-security:
     uses: arvore-builders/.github/.github/workflows/claude-security.yml@main
-    secrets: inherit
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
