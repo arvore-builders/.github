@@ -87,7 +87,7 @@ cat "$DIFF_FILE" >> "$PROMPT_FILE"
 
 echo "Running Claude CLI security analysis on push diff (model: $MODEL)..."
 RAW_OUTPUT="$(mktemp)"
-claude --output-format json --model "$MODEL" --disallowed-tools 'Bash(ps:*)' < "$PROMPT_FILE" > "$RAW_OUTPUT" 2>"${RAW_OUTPUT}.err" || {
+cat "$PROMPT_FILE" | claude -p --output-format json --model "$MODEL" --disallowed-tools 'Bash(ps:*)' > "$RAW_OUTPUT" 2>"${RAW_OUTPUT}.err" || {
   echo "::warning::Claude CLI exited non-zero"
   cat "${RAW_OUTPUT}.err" || true
 }
