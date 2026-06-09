@@ -1,0 +1,9 @@
+name: Claude Security Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  claude-security:
+    uses: arvore-builders/.github/.github/workflows/claude-security.yml@main
+    secrets: inherit

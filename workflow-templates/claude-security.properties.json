@@ -1,0 +1,7 @@
+{
+  "name": "Claude Security Review",
+  "description": "AI security review on every PR. Blocks merge on HIGH/CRITICAL findings. Requires org secret ANTHROPIC_API_KEY.",
+  "iconName": "shield",
+  "categories": ["Security"],
+  "filePatterns": [".*"]
+}

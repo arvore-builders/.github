@@ -1,0 +1,64 @@
+name: claude-security
+
+on:
+  workflow_call:
+    inputs:
+      exclude-directories:
+        required: false
+        type: string
+        default: "node_modules,dist,build,.next,coverage,vendor"
+      claude-model:
+        required: false
+        type: string
+        default: ""
+      block-on-high:
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude security review
+        id: scan
+        uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment-pr: true
+          upload-results: true
+          exclude-directories: ${{ inputs.exclude-directories }}
+          claude-model: ${{ inputs.claude-model }}
+
+      - name: Gate on HIGH/CRITICAL findings
+        if: always() && inputs.block-on-high
+        run: |
+          RESULTS="claudecode-results.json"
+          if [ ! -f "$RESULTS" ]; then
+            echo "No results file found; nothing to gate on."
+            exit 0
+          fi
+
+          if jq -e '.error' "$RESULTS" >/dev/null 2>&1; then
+            echo "::warning::Scan reported an error; not blocking merge on scan failure."
+            exit 0
+          fi
+
+          BLOCKING=$(jq '[.findings[]? | select((.severity | ascii_upcase) == "HIGH" or (.severity | ascii_upcase) == "CRITICAL")] | length' "$RESULTS")
+          echo "HIGH/CRITICAL findings: $BLOCKING"
+
+          if [ "$BLOCKING" -gt 0 ]; then
+            echo "::error::$BLOCKING HIGH/CRITICAL security finding(s) detected. Resolve them or override via repo admin before merging."
+            jq -r '.findings[]? | select((.severity | ascii_upcase) == "HIGH" or (.severity | ascii_upcase) == "CRITICAL") | "- [\(.severity)] \(.file):\(.line) — \(.description)"' "$RESULTS"
+            exit 1
+          fi
+
+          echo "No HIGH/CRITICAL findings. Gate passed."
