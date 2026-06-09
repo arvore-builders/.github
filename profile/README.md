@@ -95,11 +95,12 @@ O workflow reutilizável aceita inputs via `with:`:
 - `exclude-directories` — pastas a ignorar (padrão: `node_modules,dist,build,.next,coverage,vendor`)
 - `claude-model` — troca o modelo Claude (padrão: `claude-sonnet-4-6`)
 
-### Limitações do plano Free (importante)
+### Limitações do plano Free
 
-- **A esteira é informativa, não bloqueante.** Em repositório privado no Free, o GitHub não permite bloquear merge nem impedir push direto (exige plano **Team/Pro**). A defesa atual é detectar + avisar.
 - **Sem enforcement automático org-wide.** Cada repo é habilitado individualmente (template + 2 secrets).
-- Para bloqueio real e aplicação automática em todos os repos, o caminho é migrar para **GitHub Team**, que destrava branch protection em repos privados e org rulesets.
+- Recursos de enforcement mais fortes (aplicação automática em todos os repos, regras de proteção em repositórios privados) dependem de upgrade para o plano **GitHub Team**.
+
+> ℹ️ Detalhes operacionais sobre o que a esteira bloqueia vs. apenas reporta em cada contexto ficam na documentação interna do time de tecnologia, não aqui.
 
 ### Segurança da própria esteira
 
