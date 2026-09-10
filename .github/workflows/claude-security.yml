@@ -77,7 +77,9 @@ jobs:
           path: .security-pipeline
 
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        # jq já vem nos runners ubuntu. Rodar apt-get sempre expõe o job a
+        # falha de mirror (exit 100), e aí o push não é revisado.
+        run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
 
       - name: Run push security scan
         env:
