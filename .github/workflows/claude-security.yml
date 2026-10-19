@@ -37,6 +37,9 @@ jobs:
           ref: main
           path: .security-pipeline
 
+      - name: Remove stale scan output
+        run: rm -f -- claudecode-results.json security-evaluation.json coverage.json
+
       - name: Claude security review
         id: scan
         uses: anthropics/claude-code-security-review@main
@@ -46,10 +49,14 @@ jobs:
           upload-results: "true"
           exclude-directories: ${{ inputs.exclude-directories }}
           claude-model: ${{ inputs.claude-model }}
+          run-every-commit: "true"
+          custom-security-scan-instructions: ${{ github.workspace }}/.security-pipeline/.github/security-scripts/review-policy.txt
+          false-positive-filtering-instructions: ${{ github.workspace }}/.security-pipeline/.github/security-scripts/review-policy.txt
 
       - name: Evaluate findings and notify
         if: always()
         env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
           SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
           CONTEXT_KIND: "pull_request"
           CONTEXT_REF: ${{ github.event.pull_request.html_url }}
@@ -58,11 +65,22 @@ jobs:
           CONTEXT_ACTOR: ${{ github.actor }}
         run: bash .security-pipeline/.github/security-scripts/evaluate-and-notify.sh claudecode-results.json
 
+      - name: Attest successful review coverage
+        run: python3 .security-pipeline/.github/security-scripts/write_coverage.py
+
+      - name: Upload successful review coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-review-coverage
+          path: coverage.json
+          retention-days: 30
+          if-no-files-found: error
+
   push-review:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    # Inherit caller permissions. Optional coverage reuse requires actions: read;
+    # without it the scanner still runs and never assumes an approved PR.
     steps:
       - name: Checkout target repo
         uses: actions/checkout@v4
@@ -76,11 +94,10 @@ jobs:
           ref: main
           path: .security-pipeline
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Run push security scan
+        id: scan
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.claude-model }}
           EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
@@ -91,6 +108,7 @@ jobs:
       - name: Evaluate findings and notify
         if: always()
         env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
           SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
           CONTEXT_KIND: "push"
           CONTEXT_REF: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
@@ -98,3 +116,13 @@ jobs:
           CONTEXT_REPO: ${{ github.repository }}
           CONTEXT_ACTOR: ${{ github.actor }}
         run: bash .security-pipeline/.github/security-scripts/evaluate-and-notify.sh claudecode-results.json
+
+      - name: Upload push review results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-security-review-results
+          path: |
+            claudecode-results.json
+            security-evaluation.json
+          if-no-files-found: warn
