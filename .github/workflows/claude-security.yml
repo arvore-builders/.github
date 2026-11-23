@@ -111,6 +111,7 @@ jobs:
       - name: Send the finding to the SRE intake queue
         if: always() && steps.evaluate.outputs.queue == 'true'
         env:
+          SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
           SRE_INTAKE_QUEUE_URL: ${{ vars.SRE_INTAKE_QUEUE_URL }}
           INTAKE_OUTBOX: ${{ runner.temp }}/intake-notice.json
         run: bash .security-pipeline/.github/security-scripts/send-intake.sh
