@@ -61,8 +61,6 @@ jobs:
   push-review:
     if: github.event_name == 'push'
     runs-on: arc-runner-set-builders
-    permissions:
-      contents: read
     steps:
       - name: Checkout target repo
         uses: actions/checkout@v4
@@ -89,12 +87,31 @@ jobs:
         run: bash .security-pipeline/.github/security-scripts/push-scan.sh
 
       - name: Evaluate findings and notify
+        id: evaluate
         if: always()
         env:
           SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+          SRE_INTAKE_QUEUE_URL: ${{ vars.SRE_INTAKE_QUEUE_URL }}
+          INTAKE_OUTBOX: ${{ runner.temp }}/intake-notice.json
           CONTEXT_KIND: "push"
           CONTEXT_REF: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           CONTEXT_TITLE: ${{ github.event.head_commit.message }}
           CONTEXT_REPO: ${{ github.repository }}
+          CONTEXT_SHA: ${{ github.sha }}
           CONTEXT_ACTOR: ${{ github.actor }}
         run: bash .security-pipeline/.github/security-scripts/evaluate-and-notify.sh claudecode-results.json
+
+      - name: Configure AWS for the SRE intake queue
+        if: always() && steps.evaluate.outputs.queue == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SRE_INTAKE_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Send the finding to the SRE intake queue
+        if: always() && steps.evaluate.outputs.queue == 'true'
+        env:
+          SLACK_SECURITY_WEBHOOK: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+          SRE_INTAKE_QUEUE_URL: ${{ vars.SRE_INTAKE_QUEUE_URL }}
+          INTAKE_OUTBOX: ${{ runner.temp }}/intake-notice.json
+        run: bash .security-pipeline/.github/security-scripts/send-intake.sh
